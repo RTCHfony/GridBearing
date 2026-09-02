@@ -4,6 +4,8 @@ A minimal, offline, single-file web app for converting between **MGRS** grid coo
 
 No install, no build step, no backend, no tracking. Everything runs client-side in the browser and works entirely offline once loaded (all math — including MGRS/UTM conversion on the WGS84 ellipsoid — is computed locally in JavaScript).
 
+The interface automatically follows your device's language (German or English, detected from browser settings) and its light/dark mode setting.
+
 ## Why this exists
 
 This tool bridges a gap between digital map planning and old-school compass navigation:

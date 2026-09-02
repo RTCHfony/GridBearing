@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="GridBearing">
+<meta name="color-scheme" content="light dark">
+<link rel="manifest" href="manifest.json">
+<title>GridBearing – MGRS / Lat-Lon Navigation</title>
+<style>
+  :root {
+    --bg: #101012; --card: #1c1c1f; --border: #2e2e32;
+    --text: #f2f2f0; --text-secondary: #9a9a96;
+    --accent: #4d8dff; --danger: #e0524f;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f4f5; --card: #ffffff; --border: #dcdce0;
+      --text: #17171a; --text-secondary: #6b6b70;
+      --accent: #2f6fe0; --danger: #c8362f;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; padding:0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif; min-height:100vh; }
+  .wrap { max-width: 480px; margin: 0 auto;
+    padding: max(env(safe-area-inset-top), 24px) 20px calc(env(safe-area-inset-bottom, 20px) + 20px); }
+  h1 { font-size: 20px; font-weight: 600; margin: 8px 0 4px; }
+  .subtitle { font-size: 14px; color: var(--text-secondary); margin: 0 0 20px; line-height: 1.4; }
+  .section-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;
+    color: var(--text-secondary); margin: 22px 0 8px; }
+  .input-row { display: flex; gap: 8px; margin-bottom: 4px; }
+  input[type="text"] { flex: 1; min-width: 0; font-size: 16px; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text); }
+  input[type="text"]:focus { outline: none; border-color: var(--accent); }
+  button { font-size: 15px; font-weight: 500; padding: 12px 16px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text); white-space: nowrap; }
+  button:active { transform: scale(0.97); }
+  .btn-accent { color: var(--accent); border-color: rgba(77,141,255,0.4); }
+  .err { font-size: 13px; color: var(--danger); margin: 6px 0 0; display: none; }
+  .ref-line { font-size: 12px; color: var(--text-secondary); margin: 6px 2px 0; min-height: 16px; }
+  .ref-line b { color: var(--text); font-weight: 600; }
+
+  .target-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px 16px; margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .target-info { min-width: 0; }
+  .target-info .lbl { font-size: 11px; color: var(--text-secondary); margin: 0 0 2px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .target-info .val { font-size: 15px; font-weight: 600; margin: 0; word-break: break-word; }
+  .target-empty { font-size: 14px; color: var(--text-secondary); }
+
+  .unit-toggle { display: flex; background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 3px; margin-top: 22px; }
+  .unit-toggle button { flex: 1; background: transparent; border: none; padding: 9px 0; font-size: 14px; }
+  .unit-toggle button.active { background: var(--accent); color: white; border-radius: 8px; }
+
+  .results { margin-top: 14px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 16px 18px; margin-bottom: 12px; }
+  .card-label { font-size: 12px; color: var(--text-secondary); margin: 0 0 4px; }
+  .card-value { font-size: 22px; font-weight: 600; margin: 0; }
+  .card-value.big { font-size: 36px; color: var(--accent); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .note { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-top: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 data-i18n="title">Navigation</h1>
+  <p class="subtitle" data-i18n="subtitle">MGRS oder Lat/Lon eingeben (z. B. aus Apple/Google Maps kopiert). Ziel bleibt gespeichert, Standort laufend aktualisierbar.</p>
+
+  <div class="section-label" data-i18n="targetLabel">Ziel</div>
+  <div class="input-row">
+    <input type="text" id="targetInput" data-i18n-placeholder="inputPlaceholder" placeholder="MGRS oder 49,21011° N, 12,68932° E">
+    <button id="setTargetBtn" class="btn-accent" data-i18n="setBtn">Setzen</button>
+  </div>
+  <p class="err" id="targetErr"></p>
+  <p class="ref-line" id="targetRef"></p>
+
+  <div class="target-card">
+    <div class="target-info" id="targetInfo"><p class="target-empty" data-i18n="noTarget">Noch kein Ziel gesetzt</p></div>
+    <button id="clearTargetBtn" data-i18n="clearBtn">Löschen</button>
+  </div>
+
+  <div class="section-label" data-i18n="sourceLabel">Aktueller Standort</div>
+  <div class="input-row">
+    <input type="text" id="sourceInput" data-i18n-placeholder="inputPlaceholder" placeholder="MGRS oder 49,21011° N, 12,68932° E">
+    <button id="pasteBtn">📋</button>
+  </div>
+  <p class="err" id="sourceErr"></p>
+  <p class="ref-line" id="sourceRef"></p>
+
+  <div class="unit-toggle">
+    <button id="unitMils" class="active" data-i18n="unitMils">Mils (6400)</button>
+    <button id="unitDeg" data-i18n="unitDeg">Grad (360)</button>
+  </div>
+
+  <div class="results" id="results" style="display:none;">
+    <div class="card">
+      <p class="card-label" data-i18n="directionLabel">Richtung zum Ziel</p>
+      <p class="card-value big" id="primaryOut">--</p>
+      <p class="card-label" id="secondaryOut" style="margin-top:6px;">--</p>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <p class="card-label" data-i18n="distanceLabel">Entfernung</p>
+        <p class="card-value" id="distOut">--</p>
+      </div>
+      <div class="card">
+        <p class="card-label">ΔE / ΔN</p>
+        <p class="card-value" id="deltaOut" style="font-size:16px;">--</p>
+      </div>
+    </div>
+  </div>
+
+  <p class="note" data-i18n="note">Nur innerhalb desselben 100-km-Quadranten gültig. Lat/Lon wird offline in MGRS/UTM umgerechnet (WGS84).</p>
+</div>
+
+<script>
+/* ---------- MGRS / UTM math (WGS84, offline) ---------- */
+const A_CC = 65, I_CC = 73, O_CC = 79, Z_CC = 90;
+const SET_ORIGIN_COL = 'AJSAJS';
+const SET_ORIGIN_ROW = 'AFAFAF';
+
+function degToRad(d) { return d * Math.PI / 180; }
+
+function getLatBand(lat) {
+  const bands = [
+    [84,72,'X'],[72,64,'W'],[64,56,'V'],[56,48,'U'],[48,40,'T'],[40,32,'S'],
+    [32,24,'R'],[24,16,'Q'],[16,8,'P'],[8,0,'N'],[0,-8,'M'],[-8,-16,'L'],
+    [-16,-24,'K'],[-24,-32,'J'],[-32,-40,'H'],[-40,-48,'G'],[-48,-56,'F'],
+    [-56,-64,'E'],[-64,-72,'D'],[-72,-80,'C']
+  ];
+  for (const [hi, lo, letter] of bands) { if (lat <= hi && lat >= lo) return letter; }
+  return 'Z';
+}
+
+function llToUTM(lat, lon) {
+  const a = 6378137.0, eccSq = 0.00669438, k0 = 0.9996;
+  let zoneNumber = Math.floor((lon + 180) / 6) + 1;
+  if (lat >= 56 && lat < 64 && lon >= 3 && lon < 12) zoneNumber = 32;
+  if (lat >= 72 && lat < 84) {
+    if (lon >= 0 && lon < 9) zoneNumber = 31;
+    else if (lon >= 9 && lon < 21) zoneNumber = 33;
+    else if (lon >= 21 && lon < 33) zoneNumber = 35;
+    else if (lon >= 33 && lon < 42) zoneNumber = 37;
+  }
+  const lonOrigin = (zoneNumber - 1) * 6 - 180 + 3;
+  const latRad = degToRad(lat), lonRad = degToRad(lon), lonOriginRad = degToRad(lonOrigin);
+  const eccPrimeSq = eccSq / (1 - eccSq);
+  const N = a / Math.sqrt(1 - eccSq * Math.sin(latRad) ** 2);
+  const T = Math.tan(latRad) ** 2;
+  const C = eccPrimeSq * Math.cos(latRad) ** 2;
+  const Aa = Math.cos(latRad) * (lonRad - lonOriginRad);
+  const M = a * ((1 - eccSq/4 - 3*eccSq*eccSq/64 - 5*eccSq**3/256) * latRad
+    - (3*eccSq/8 + 3*eccSq*eccSq/32 + 45*eccSq**3/1024) * Math.sin(2*latRad)
+    + (15*eccSq*eccSq/256 + 45*eccSq**3/1024) * Math.sin(4*latRad)
+    - (35*eccSq**3/3072) * Math.sin(6*latRad));
+  let easting = k0*N*(Aa + (1-T+C)*Aa**3/6 + (5-18*T+T*T+72*C-58*eccPrimeSq)*Aa**5/120) + 500000;
+  let northing = k0*(M + N*Math.tan(latRad)*(Aa*Aa/2 + (5-T+9*C+4*C*C)*Aa**4/24
+    + (61-58*T+T*T+600*C-330*eccPrimeSq)*Aa**6/720));
+  if (lat < 0) northing += 10000000;
+  return { easting: Math.round(easting), northing: Math.round(northing), zoneNumber, zoneLetter: getLatBand(lat) };
+}
+
+function get100kID(easting, northing, zoneNumber) {
+  const col = Math.floor(easting / 100000);
+  const row = Math.floor(northing / 100000) % 20;
+  let setNumber = zoneNumber % 6; if (setNumber === 0) setNumber = 6;
+  const colOrigin = SET_ORIGIN_COL.charCodeAt(setNumber - 1);
+  const rowOrigin = SET_ORIGIN_ROW.charCodeAt(setNumber - 1);
+  let colInt = colOrigin + col - 1;
+  let rowInt = rowOrigin + row;
+  let rollover = false;
+  if (colInt > Z_CC) { colInt = colInt - Z_CC + A_CC - 1; rollover = true; }
+  if (colInt === I_CC || (colOrigin < I_CC && colInt > I_CC) || ((colInt > I_CC || colOrigin < I_CC) && rollover)) colInt++;
+  if (colInt === O_CC || (colOrigin < O_CC && colInt > O_CC) || ((colInt > O_CC || colOrigin < O_CC) && rollover)) { colInt++; if (colInt === I_CC) colInt++; }
+  if (colInt > Z_CC) colInt = colInt - Z_CC + A_CC - 1;
+  if (rowInt > Z_CC) { rowInt = rowInt - Z_CC + A_CC - 1; rollover = true; } else rollover = false;
+  if (rowInt === I_CC || (rowOrigin < I_CC && rowInt > I_CC) || ((rowInt > I_CC || rowOrigin < I_CC) && rollover)) rowInt++;
+  if (rowInt === O_CC || (rowOrigin < O_CC && rowInt > O_CC) || ((rowInt > O_CC || rowOrigin < O_CC) && rollover)) { rowInt++; if (rowInt === I_CC) rowInt++; }
+  if (rowInt > Z_CC) rowInt = rowInt - Z_CC + A_CC - 1;
+  return String.fromCharCode(colInt) + String.fromCharCode(rowInt);
+}
+
+function padLeft(num, len) { let s = String(Math.floor(num)); while (s.length < len) s = '0' + s; return s; }
+
+function pointFromUTM(easting, northing, zoneNumber, zoneLetter) {
+  const square = get100kID(easting, northing, zoneNumber);
+  const localE = easting % 100000, localN = northing % 100000;
+  const mgrsStr = zoneNumber + zoneLetter + square + padLeft(localE, 5) + padLeft(localN, 5);
+  return { zone: zoneNumber, band: zoneLetter, square, easting: localE, northing: localN, raw: mgrsStr };
+}
+
+/* ---------- Parsing ---------- */
+function parseMGRS(raw) {
+  const s = raw.replace(/\s+/g, '').toUpperCase();
+  const m = s.match(/^(\d{1,2})([C-HJ-NP-X])([A-HJ-NP-Z]{2})(\d+)$/);
+  if (!m) return null;
+  const [, zoneStr, band, square, digits] = m;
+  if (digits.length % 2 !== 0 || digits.length === 0 || digits.length > 10) return null;
+  const n = digits.length / 2;
+  const precision = Math.pow(10, 5 - n);
+  const easting = parseInt(digits.slice(0, n), 10) * precision;
+  const northing = parseInt(digits.slice(n), 10) * precision;
+  return { zone: parseInt(zoneStr, 10), band, square, easting, northing, raw: s, sourceType: 'mgrs' };
+}
+
+function parseLatLon(raw) {
+  const s = raw.trim();
+  // Format with degree symbol + N/S/E/W, e.g. "49,21011° N, 12,68932° E"
+  const dirMatches = [...s.matchAll(/(-?\d+(?:[.,]\d+)?)\s*°?\s*([NSEWnsew])/g)];
+  if (dirMatches.length >= 2) {
+    let lat = null, lon = null;
+    for (const m of dirMatches) {
+      const val = parseFloat(m[1].replace(',', '.'));
+      const dir = m[2].toUpperCase();
+      if (dir === 'N' || dir === 'S') lat = dir === 'S' ? -val : val;
+      if (dir === 'E' || dir === 'W') lon = dir === 'W' ? -val : val;
+    }
+    if (lat !== null && lon !== null) return { lat, lon };
+  }
+  // Plain "lat, lon" decimal (dot), e.g. "49.21011, 12.68932"
+  const plain = s.match(/^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$/);
+  if (plain) return { lat: parseFloat(plain[1]), lon: parseFloat(plain[2]) };
+  return null;
+}
+
+function parseInput(raw) {
+  if (!raw || !raw.trim()) return null;
+  const mgrs = parseMGRS(raw);
+  if (mgrs) return mgrs;
+  const ll = parseLatLon(raw);
+  if (ll) {
+    const utm = llToUTM(ll.lat, ll.lon);
+    const point = pointFromUTM(utm.easting, utm.northing, utm.zoneNumber, utm.zoneLetter);
+    point.sourceType = 'latlon';
+    point.lat = ll.lat; point.lon = ll.lon;
+    return point;
+  }
+  return null;
+}
+
+/* ---------- i18n ---------- */
+const I18N = {
+  de: {
+    title: 'GridBearing',
+    subtitle: 'MGRS oder Lat/Lon eingeben (z. B. aus Apple/Google Maps kopiert). Ziel bleibt gespeichert, Standort laufend aktualisierbar.',
+    targetLabel: 'Ziel',
+    sourceLabel: 'Aktueller Standort',
+    inputPlaceholder: 'MGRS oder 49,21011° N, 12,68932° E',
+    setBtn: 'Setzen',
+    clearBtn: 'Löschen',
+    noTarget: 'Noch kein Ziel gesetzt',
+    activeTarget: 'Aktives Ziel',
+    unitMils: 'Mils (6400)',
+    unitDeg: 'Grad (360)',
+    directionLabel: 'Richtung zum Ziel',
+    distanceLabel: 'Entfernung',
+    note: 'Nur innerhalb desselben 100-km-Quadranten gültig. Lat/Lon wird offline in MGRS/UTM umgerechnet (WGS84).',
+    invalidFormat: 'Ungültiges Format (MGRS oder Lat/Lon erwartet).',
+    differentSquare: 'Standort liegt in einem anderen 100-km-Quadranten als das Ziel.',
+    noClipboard: 'Kein Clipboard-Zugriff — bitte manuell einfügen.',
+    mgrsRef: 'MGRS'
+  },
+  en: {
+    title: 'GridBearing',
+    subtitle: 'Enter MGRS or Lat/Lon (e.g. copied from Apple/Google Maps). Target stays saved, location can be updated anytime.',
+    targetLabel: 'Target',
+    sourceLabel: 'Current Location',
+    inputPlaceholder: 'MGRS or 49.21011° N, 12.68932° E',
+    setBtn: 'Set',
+    clearBtn: 'Clear',
+    noTarget: 'No target set yet',
+    activeTarget: 'Active target',
+    unitMils: 'Mils (6400)',
+    unitDeg: 'Degrees (360)',
+    directionLabel: 'Direction to target',
+    distanceLabel: 'Distance',
+    note: 'Only valid within the same 100 km square. Lat/Lon is converted to MGRS/UTM offline (WGS84).',
+    invalidFormat: 'Invalid format (MGRS or Lat/Lon expected).',
+    differentSquare: 'Location is in a different 100 km square than the target.',
+    noClipboard: 'No clipboard access — please paste manually.',
+    mgrsRef: 'MGRS'
+  }
+};
+
+function detectLang() {
+  const langs = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language || 'en'];
+  for (const l of langs) {
+    const code = l.toLowerCase().slice(0, 2);
+    if (I18N[code]) return code;
+  }
+  return 'en';
+}
+const LANG = detectLang();
+const T = I18N[LANG];
+document.documentElement.lang = LANG;
+
+function applyI18n() {
+  document.title = T.title + ': MGRS / Lat-Lon';
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (T[key] !== undefined) el.textContent = T[key];
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    if (T[key] !== undefined) el.placeholder = T[key];
+  });
+}
+applyI18n();
+
+/* ---------- App state / UI ---------- */
+const targetInput = document.getElementById('targetInput');
+const sourceInput = document.getElementById('sourceInput');
+const targetErr = document.getElementById('targetErr');
+const sourceErr = document.getElementById('sourceErr');
+const targetRef = document.getElementById('targetRef');
+const sourceRef = document.getElementById('sourceRef');
+const targetInfo = document.getElementById('targetInfo');
+const results = document.getElementById('results');
+const primaryOut = document.getElementById('primaryOut');
+const secondaryOut = document.getElementById('secondaryOut');
+const distOut = document.getElementById('distOut');
+const deltaOut = document.getElementById('deltaOut');
+const unitMilsBtn = document.getElementById('unitMils');
+const unitDegBtn = document.getElementById('unitDeg');
+
+const STORAGE_KEY = 'navTool.target';
+const UNIT_KEY = 'navTool.unit';
+let unit = localStorage.getItem(UNIT_KEY) || 'mils';
+
+function setUnit(u) {
+  unit = u;
+  localStorage.setItem(UNIT_KEY, u);
+  unitMilsBtn.classList.toggle('active', u === 'mils');
+  unitDegBtn.classList.toggle('active', u === 'deg');
+  compute();
+}
+unitMilsBtn.addEventListener('click', () => setUnit('mils'));
+unitDegBtn.addEventListener('click', () => setUnit('deg'));
+setUnit(unit);
+
+function loadTarget() {
+  try { const s = localStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; }
+}
+function saveTarget(t) { localStorage.setItem(STORAGE_KEY, JSON.stringify(t)); }
+function clearTargetStorage() { localStorage.removeItem(STORAGE_KEY); }
+
+function renderTarget(t) {
+  if (!t) { targetInfo.innerHTML = '<p class="target-empty">' + T.noTarget + '</p>'; return; }
+  targetInfo.innerHTML = '<p class="lbl">' + T.activeTarget + '</p><p class="val">' + t.raw + '</p>';
+}
+
+function showRef(el, point) {
+  if (point && point.sourceType === 'latlon') {
+    el.innerHTML = '→ ' + T.mgrsRef + ': <b>' + point.raw + '</b>';
+  } else {
+    el.textContent = '';
+  }
+}
+
+function normalize(d) { return ((d % 360) + 360) % 360; }
+
+function compute() {
+  const target = loadTarget();
+  if (!target) { results.style.display = 'none'; return; }
+
+  const rawSource = sourceInput.value.trim();
+  if (rawSource === '') { results.style.display = 'none'; sourceErr.style.display = 'none'; sourceRef.textContent=''; return; }
+
+  const source = parseInput(rawSource);
+  if (!source) {
+    sourceErr.textContent = T.invalidFormat;
+    sourceErr.style.display = 'block';
+    results.style.display = 'none';
+    sourceRef.textContent = '';
+    return;
+  }
+  sourceErr.style.display = 'none';
+  showRef(sourceRef, source);
+
+  if (source.zone !== target.zone || source.band !== target.band || source.square !== target.square) {
+    sourceErr.textContent = T.differentSquare;
+    sourceErr.style.display = 'block';
+    results.style.display = 'none';
+    return;
+  }
+
+  const dE = target.easting - source.easting;
+  const dN = target.northing - source.northing;
+  const dist = Math.sqrt(dE*dE + dN*dN);
+  const azimuth = normalize(Math.atan2(dE, dN) * 180 / Math.PI);
+  const mils = Math.round(azimuth * (6400/360));
+  const deg = azimuth.toFixed(1);
+
+  if (unit === 'mils') {
+    primaryOut.textContent = mils + ' mils';
+    secondaryOut.textContent = deg + '°';
+  } else {
+    primaryOut.textContent = deg + '°';
+    secondaryOut.textContent = mils + ' mils';
+  }
+  distOut.textContent = Math.round(dist) + ' m';
+  deltaOut.textContent = (dE>=0?'+':'') + Math.round(dE) + ' / ' + (dN>=0?'+':'') + Math.round(dN);
+  results.style.display = 'block';
+}
+
+document.getElementById('setTargetBtn').addEventListener('click', () => {
+  const raw = targetInput.value.trim();
+  const parsed = parseInput(raw);
+  if (!parsed) {
+    targetErr.textContent = T.invalidFormat;
+    targetErr.style.display = 'block';
+    targetRef.textContent = '';
+    return;
+  }
+  targetErr.style.display = 'none';
+  showRef(targetRef, parsed);
+  saveTarget(parsed);
+  renderTarget(parsed);
+  compute();
+});
+
+document.getElementById('clearTargetBtn').addEventListener('click', () => {
+  clearTargetStorage();
+  renderTarget(null);
+  results.style.display = 'none';
+});
+
+document.getElementById('pasteBtn').addEventListener('click', async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    sourceInput.value = text.trim();
+    compute();
+  } catch (e) {
+    sourceErr.textContent = T.noClipboard;
+    sourceErr.style.display = 'block';
+  }
+});
+
+targetInput.addEventListener('input', () => {
+  const p = parseInput(targetInput.value);
+  targetErr.style.display = 'none';
+  showRef(targetRef, p);
+});
+sourceInput.addEventListener('input', compute);
+
+renderTarget(loadTarget());
+compute();
+</script>
+</body>
+</html>
