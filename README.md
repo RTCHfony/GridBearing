@@ -44,6 +44,3 @@ GitHub Pages serves over HTTPS by default, which is required for the clipboard-p
 - No offline app install/caching (no service worker) — it behaves like a bookmarked page, not a fully installable PWA. Easy to add later if needed.
 - No built-in map rendering — this tool is a calculator, meant to complement a map app and a physical compass, not replace either.
 
-## License
-
-MIT — see [LICENSE](LICENSE).
