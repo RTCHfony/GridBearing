@@ -207,31 +207,102 @@ function parseMGRS(raw) {
   return { zone: parseInt(zoneStr, 10), band, square, easting, northing, raw: s, sourceType: 'mgrs' };
 }
 
+function num(str) { return parseFloat(String(str).replace(',', '.')); }
+
+// Matches one geographic coordinate token in DD, DDM, or DMS form, with an
+// optional compass letter before or after (N/S/E/W), e.g.:
+//   49.21011   49,21011°   N49°12.607'   49°12'36.4"N   49° 12' 36.4" N
+const COORD_RE = /([NSEWnsew])?\s*(-?\d{1,3}(?:[.,]\d+)?)\s*(?:[°ºd]\s*(?:(\d{1,2}(?:[.,]\d+)?)\s*['′]\s*(?:(\d{1,2}(?:[.,]\d+)?)\s*["″]?)?)?)?\s*([NSEWnsew])?/g;
+
 function parseLatLon(raw) {
   const s = raw.trim();
-  // Format with degree symbol + N/S/E/W, e.g. "49,21011° N, 12,68932° E"
-  const dirMatches = [...s.matchAll(/(-?\d+(?:[.,]\d+)?)\s*°?\s*([NSEWnsew])/g)];
-  if (dirMatches.length >= 2) {
-    let lat = null, lon = null;
-    for (const m of dirMatches) {
-      const val = parseFloat(m[1].replace(',', '.'));
-      const dir = m[2].toUpperCase();
-      if (dir === 'N' || dir === 'S') lat = dir === 'S' ? -val : val;
-      if (dir === 'E' || dir === 'W') lon = dir === 'W' ? -val : val;
-    }
-    if (lat !== null && lon !== null) return { lat, lon };
+  if (!s) return null;
+
+  const matches = [...s.matchAll(COORD_RE)].filter(m => m[2] !== undefined && m[0].trim() !== '');
+  if (matches.length < 2) return null;
+
+  const coords = [];
+  for (const m of matches) {
+    const deg = num(m[2]);
+    const min = m[3] !== undefined ? num(m[3]) : 0;
+    const sec = m[4] !== undefined ? num(m[4]) : 0;
+    const dir = (m[1] || m[5] || '').toUpperCase();
+    let value = Math.abs(deg) + min / 60 + sec / 3600;
+    if (deg < 0 || dir === 'S' || dir === 'W') value = -value;
+    coords.push({ value, dir });
   }
-  // Plain "lat, lon" decimal (dot), e.g. "49.21011, 12.68932"
-  const plain = s.match(/^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$/);
-  if (plain) return { lat: parseFloat(plain[1]), lon: parseFloat(plain[2]) };
-  return null;
+
+  // Take the first two coordinate tokens found (a lat/lon pair).
+  const [c1, c2] = coords;
+  let lat, lon;
+  if (c1.dir === 'N' || c1.dir === 'S' || c2.dir === 'E' || c2.dir === 'W') {
+    lat = c1.value; lon = c2.value;
+  } else if (c1.dir === 'E' || c1.dir === 'W' || c2.dir === 'N' || c2.dir === 'S') {
+    lon = c1.value; lat = c2.value;
+  } else {
+    // No compass letters at all: assume "lat, lon" order (common paste format).
+    lat = c1.value; lon = c2.value;
+  }
+
+  if (!(lat >= -90 && lat <= 90) || !(lon >= -180 && lon <= 180)) return null;
+  return { lat, lon };
+}
+
+// UTM: "33U 456789 5678901", "33N 456789 5678901" (N/S = hemisphere),
+// "33U 456789mE 5678901mN", etc.
+const UTM_RE = /^(\d{1,2})\s*([A-Za-z])?\s+(?:E\s*)?(\d{3,7}(?:[.,]\d+)?)\s*M?E?\s+(?:N\s*)?(\d{3,8}(?:[.,]\d+)?)\s*M?N?$/i;
+
+function utmToLatLon(zoneNumber, easting, northing, isSouth) {
+  const a = 6378137.0, eccSq = 0.00669438, k0 = 0.9996;
+  const e1sq = eccSq / (1 - eccSq);
+  const x = easting - 500000;
+  const y = isSouth ? northing - 10000000 : northing;
+  const M = y / k0;
+  const mu = M / (a * (1 - eccSq/4 - 3*eccSq*eccSq/64 - 5*Math.pow(eccSq,3)/256));
+  const e1 = (1 - Math.sqrt(1 - eccSq)) / (1 + Math.sqrt(1 - eccSq));
+  const phi1 = mu + (3*e1/2 - 27*Math.pow(e1,3)/32) * Math.sin(2*mu)
+    + (21*e1*e1/16 - 55*Math.pow(e1,4)/32) * Math.sin(4*mu)
+    + (151*Math.pow(e1,3)/96) * Math.sin(6*mu)
+    + (1097*Math.pow(e1,4)/512) * Math.sin(8*mu);
+  const N1 = a / Math.sqrt(1 - eccSq * Math.sin(phi1)**2);
+  const T1 = Math.tan(phi1)**2;
+  const C1 = e1sq * Math.cos(phi1)**2;
+  const R1 = a * (1 - eccSq) / Math.pow(1 - eccSq*Math.sin(phi1)**2, 1.5);
+  const D = x / (N1 * k0);
+  let lat = phi1 - (N1*Math.tan(phi1)/R1) * (D*D/2
+    - (5 + 3*T1 + 10*C1 - 4*C1*C1 - 9*e1sq) * Math.pow(D,4)/24
+    + (61 + 90*T1 + 298*C1 + 45*T1*T1 - 252*e1sq - 3*C1*C1) * Math.pow(D,6)/720);
+  const lonOrigin = degToRad((zoneNumber - 1) * 6 - 180 + 3);
+  let lon = lonOrigin + (D - (1 + 2*T1 + C1) * Math.pow(D,3)/6
+    + (5 - 2*C1 + 28*T1 - 3*C1*C1 + 8*e1sq + 24*T1*T1) * Math.pow(D,5)/120) / Math.cos(phi1);
+  return { lat: lat * 180 / Math.PI, lon: lon * 180 / Math.PI };
+}
+
+function parseUTM(raw) {
+  const s = raw.trim().replace(/,/g, ' ').replace(/\s+/g, ' ');
+  const m = s.match(UTM_RE);
+  if (!m) return null;
+  const zoneNumber = parseInt(m[1], 10);
+  if (zoneNumber < 1 || zoneNumber > 60) return null;
+  const letter = m[2] ? m[2].toUpperCase() : '';
+  const easting = num(m[3]);
+  const northing = num(m[4]);
+  let isSouth = false;
+  if (letter === 'S') isSouth = true;
+  else if (letter === 'N') isSouth = false;
+  else if (letter) isSouth = letter < 'N'; // MGRS band letter: C..M south, N..X north
+
+  const { lat, lon } = utmToLatLon(zoneNumber, easting, northing, isSouth);
+  if (!(lat >= -90 && lat <= 90) || !(lon >= -180 && lon <= 180)) return null;
+  return { lat, lon };
 }
 
 function parseInput(raw) {
   if (!raw || !raw.trim()) return null;
   const mgrs = parseMGRS(raw);
   if (mgrs) return mgrs;
-  const ll = parseLatLon(raw);
+
+  const ll = parseUTM(raw) || parseLatLon(raw);
   if (ll) {
     const utm = llToUTM(ll.lat, ll.lon);
     const point = pointFromUTM(utm.easting, utm.northing, utm.zoneNumber, utm.zoneLetter);
@@ -258,7 +329,7 @@ const I18N = {
     unitDeg: 'Grad (360)',
     directionLabel: 'Richtung zum Ziel',
     distanceLabel: 'Entfernung',
-    note: 'Nur innerhalb desselben 100-km-Quadranten gültig. Lat/Lon wird offline in MGRS/UTM umgerechnet (WGS84).',
+    note: 'Nur innerhalb desselben 100-km-Quadranten gültig. Unterstützt MGRS, UTM sowie Lat/Lon als Dezimalgrad, Grad/Dezimalminuten oder Grad/Minuten/Sekunden – alles wird offline umgerechnet (WGS84).',
     invalidFormat: 'Ungültiges Format (MGRS oder Lat/Lon erwartet).',
     differentSquare: 'Standort liegt in einem anderen 100-km-Quadranten als das Ziel.',
     noClipboard: 'Kein Clipboard-Zugriff — bitte manuell einfügen.',
@@ -278,7 +349,7 @@ const I18N = {
     unitDeg: 'Degrees (360)',
     directionLabel: 'Direction to target',
     distanceLabel: 'Distance',
-    note: 'Only valid within the same 100 km square. Lat/Lon is converted to MGRS/UTM offline (WGS84).',
+    note: 'Only valid within the same 100 km square. Supports MGRS, UTM, and Lat/Lon as decimal degrees, degrees/decimal minutes, or degrees/minutes/seconds – all converted offline (WGS84).',
     invalidFormat: 'Invalid format (MGRS or Lat/Lon expected).',
     differentSquare: 'Location is in a different 100 km square than the target.',
     noClipboard: 'No clipboard access — please paste manually.',
